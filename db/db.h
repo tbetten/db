@@ -39,7 +39,7 @@ namespace db
 		DB_connection(DB_connection&& other) noexcept;
 		DB_connection& operator= (DB_connection&& other) noexcept;
 		~DB_connection() noexcept;
-		friend void swap(DB_connection& first, DB_connection& second) noexcept
+		friend inline void swap(DB_connection& first, DB_connection& second) noexcept
 		{
 			using std::swap;
 			swap(first.m_path, second.m_path);
@@ -81,17 +81,23 @@ namespace db
 		sqlite3_stmt* m_statement;
 	};
 
-	class db_connection;
-	class prepared_statement;
-	struct resultset;
-
-	using db_connection_ptr = std::unique_ptr<db_connection>;
-	using prepared_statement_ptr = std::shared_ptr<prepared_statement>;
+	using db_connection_ptr = std::shared_ptr<DB_connection>;
 	//using value_t = std::variant<std::monostate, int, double, std::string>;
 
 	class db_exception : public std::runtime_error
 	{
 		using std::runtime_error::runtime_error;
+	};
+
+
+	struct cache_entry;
+
+	class DB_factory
+	{
+	public:
+		static db_connection_ptr create (const std::string& db_name, DB_connection::Mode mode = DB_connection::Mode::Read_only);
+	private:
+		static std::vector<cache_entry> m_cache;
 	};
 
 }

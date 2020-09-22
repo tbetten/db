@@ -44,4 +44,14 @@ int main()
 		auto val = std::get<std::string> (row["desc"]);
 		std::cout << val << "\n";
 	}
+
+	auto db1 = db::DB_factory::create ("db1.db", db::DB_connection::Mode::Read_write);
+	{
+		auto db2 = db::DB_factory::create ("db1.db");
+	}
+	auto db3 = db::DB_factory::create ("db1.db");
+	auto stmt1 = db3->prepare ("select desc from test where code = ?");
+	stmt1.bind (1, 2);
+	auto t = stmt1.fetch_table ();
+	auto db4 = db::DB_factory::create ("db1.db");
 }

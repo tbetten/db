@@ -116,6 +116,7 @@ namespace db
 
 	DB_connection::~DB_connection() noexcept
 	{
+		std::cout << "connection destructor for " << m_path << "\n";
 		close();
 	}
 
@@ -134,7 +135,8 @@ namespace db
 	{
 		int rc;
 		sqlite3_stmt* statement;
-		rc = sqlite3_prepare_v2(m_connection, sql.c_str(), -1, &statement, nullptr);
+		//rc = sqlite3_prepare_v2(m_connection, sql.c_str(), -1, &statement, nullptr);
+		rc = sqlite3_prepare_v2 (m_connection, sql.data(), -1, &statement, nullptr);
 		if (rc == SQLITE_OK)
 		{
 			return Prepared_statement(statement);
@@ -267,4 +269,35 @@ namespace db
 		sqlite3_clear_bindings(m_statement);
 	}
 
+	struct cache_entry
+	{
+		cache_entry (std::string k, DB_connection::Mode m, std::weak_ptr<DB_connection> p) : key { std::move (k) }, mode { m }, conn { p }{}
+		std::string key;
+		DB_connection::Mode mode;
+		std::weak_ptr<DB_connection> conn;
+	};
+
+	db_connection_ptr DB_factory::create (const std::string& db_name, db::DB_connection::Mode mode)
+	{
+		auto itr = std::find_if (std::begin (m_cache), std::end (m_cache), [&db_name, mode] (cache_entry& ce){return ce.key == db_name && ce.mode == mode; });
+		if (itr == std::end (m_cache))
+		{
+			auto ptr = std::make_shared<DB_connection> (db_name, mode);
+			//m_cache.emplace_back (cache_entry { db_name, mode, ptr });
+			m_cache.emplace_back (db_name, mode, ptr);
+			return ptr;
+		}
+		if (auto ptr = itr->conn.lock ())
+		{
+			return ptr;
+		}
+		else
+		{
+			auto p = std::make_shared<DB_connection> (db_name, mode);
+			itr->conn = p;
+			return p;
+		}
+	}
+
+	std::vector<cache_entry> DB_factory::m_cache {};
 }

@@ -34,9 +34,10 @@ int main()
 	std::cout << std::string{ static_cast<char*> (b3.value), b3.size } << "\n";
 
 	std::cout << fs::current_path() << "\n";
-	db::DB_connection db{ "db1.db" };
+	//db::DB_connection db{ "db1.db" };
+	auto db = db::DB_connection::create ("db1.db");
 
-	auto stmt = db.prepare("select desc from test where code = ?");
+	auto stmt = db->prepare("select desc from test where code = ?");
 	stmt.bind(1, 2);
 	auto table = stmt.fetch_table();
 	for (auto row : table)
@@ -45,13 +46,17 @@ int main()
 		std::cout << val << "\n";
 	}
 
-	auto db1 = db::DB_factory::create ("db1.db", db::DB_connection::Mode::Read_write);
+	//auto db1 = db::DB_factory::create ("db1.db", db::DB_connection::Mode::Read_write);
+	auto db1 = db::DB_connection::create ("db1.db", db::DB_connection::Mode::Read_write);
 	{
-		auto db2 = db::DB_factory::create ("db1.db");
+		//auto db2 = db::DB_factory::create ("db1.db");
+		auto db2 = db::DB_connection::create ("db1.db");
 	}
-	auto db3 = db::DB_factory::create ("db1.db");
+	//auto db3 = db::DB_factory::create ("db1.db");
+	auto db3 = db::DB_connection::create ("db1.db");
 	auto stmt1 = db3->prepare ("select desc from test where code = ?");
 	stmt1.bind (1, 2);
 	auto t = stmt1.fetch_table ();
-	auto db4 = db::DB_factory::create ("db1.db");
+	//auto db4 = db::DB_factory::create ("db1.db");
+	auto db4 = db::DB_connection::create ("db1.db");
 }

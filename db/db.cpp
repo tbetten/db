@@ -1,6 +1,6 @@
 
 #include "db.h"
-#include "sqlite3.h"
+//#include "sqlite3.h"
 #include <iostream>
 #include <cstdlib>
 
@@ -63,6 +63,21 @@ namespace db
 		std::free(value);
 	}
 
+	class Connection_deleter
+	{
+	public:
+		void operator()(DB_connection* conn)
+		{
+			sqlite3_stmt* stmt = sqlite3_next_stmt (conn->m_connection, nullptr);
+			while (stmt != nullptr)
+			{
+				sqlite3_finalize (stmt);
+				stmt = sqlite3_next_stmt (conn->m_connection, stmt);
+			}
+			sqlite3_close_v2 (conn->m_connection);
+		}
+	};
+
 	int convert_mode(DB_connection::Mode mode) noexcept
 	{
 		switch (mode)
@@ -78,20 +93,21 @@ namespace db
 		}
 	}
 
-	DB_connection::DB_connection(std::string path, Mode mode) : m_path{ std::move(path) }, m_mode{ mode }
+	DB_connection::DB_connection(std::string path, Mode mode)// : m_path{ std::move(path) }, m_mode{ mode }
 	{
 		int rc;
-		rc = sqlite3_open_v2(m_path.c_str(), &m_connection, convert_mode(m_mode), nullptr);
+		//rc = sqlite3_open_v2(m_path.c_str(), &m_connection, convert_mode(m_mode), nullptr);
+		rc = sqlite3_open_v2 (path.c_str (), &m_connection, convert_mode (mode), nullptr);
 		if (rc != SQLITE_OK)
 		{
 			std::string msg = sqlite3_errmsg(m_connection);
 			sqlite3_close_v2(m_connection);
 			m_connection = nullptr;
-			throw (db_exception("Could not open database " + m_path + ": " + msg));
+			throw (db_exception("Could not open database " + path + ": " + msg));
 		}
 	}
 
-	DB_connection::DB_connection(const DB_connection& other) : DB_connection{ other.m_path, other.m_mode } {}
+/*	DB_connection::DB_connection(const DB_connection& other) : DB_connection{ other.m_path, other.m_mode } {}
 
 	DB_connection& DB_connection::operator=(DB_connection other)
 	{
@@ -129,6 +145,29 @@ namespace db
 			statement = sqlite3_next_stmt(m_connection, statement);
 		}
 		sqlite3_close_v2(m_connection);
+	}*/
+	
+
+
+	DB_connection::Ptr DB_connection::create (const std::string& name, Mode mode)
+	{
+		auto itr = std::find_if (std::begin (m_cache), std::end (m_cache), [&name, mode] (cache_entry& ce){return ce.key == name && ce.mode == mode; });
+		if (itr == std::end (m_cache))
+		{
+			auto conn = std::shared_ptr<DB_connection> { new DB_connection{name, mode}, Connection_deleter{} };
+			m_cache.emplace_back (name, mode, conn);
+			return conn;
+		}
+		if (auto conn = itr->conn.lock ())
+		{
+			return conn;
+		}
+		else
+		{
+			auto new_conn = std::shared_ptr<DB_connection> (new DB_connection { name, mode }, Connection_deleter {});
+			conn = new_conn;
+			return new_conn;
+		}
 	}
 
 	Prepared_statement DB_connection::prepare(std::string sql)
@@ -148,7 +187,7 @@ namespace db
 		}
 	}
 
-	Prepared_statement::Prepared_statement(Prepared_statement&& other) noexcept
+/*	Prepared_statement::Prepared_statement(Prepared_statement&& other) noexcept
 	{
 		m_statement = other.m_statement;
 		other.m_statement = nullptr;
@@ -165,6 +204,11 @@ namespace db
 	Prepared_statement::~Prepared_statement() noexcept
 	{
 		sqlite3_finalize(m_statement);
+	}*/
+
+	Prepared_statement::Prepared_statement (sqlite3_stmt* stmt)
+	{
+		m_statement.reset (stmt);
 	}
 
 	void handle_error(int errorcode)
@@ -190,11 +234,11 @@ namespace db
 		(
 			overload
 			{
-				[this, index](const std::monostate m) {handle_error(sqlite3_bind_null(m_statement, index)); },
-				[this, index](const int i) {handle_error(sqlite3_bind_int(m_statement, index, i)); },
-				[this, index](const double d) {handle_error(sqlite3_bind_double(m_statement, index, d)); },
-				[this, index](const std::string& s) {handle_error(sqlite3_bind_text(m_statement, index, s.c_str(), -1, SQLITE_TRANSIENT)); },
-				[this, index](const Blob b) {handle_error(sqlite3_bind_blob(m_statement, index, b.value, b.size, SQLITE_TRANSIENT)); }
+				[this, index](const std::monostate m) {handle_error(sqlite3_bind_null(m_statement.get(), index)); },
+				[this, index](const int i) {handle_error(sqlite3_bind_int(m_statement.get(), index, i)); },
+				[this, index](const double d) {handle_error(sqlite3_bind_double(m_statement.get(), index, d)); },
+				[this, index](const std::string& s) {handle_error(sqlite3_bind_text(m_statement.get(), index, s.c_str(), -1, SQLITE_TRANSIENT)); },
+				[this, index](const Blob b) {handle_error(sqlite3_bind_blob(m_statement.get(), index, b.value, b.size, SQLITE_TRANSIENT)); }
 			}
 			, value
 		);
@@ -202,7 +246,7 @@ namespace db
 
 	Prepared_statement::Row_result Prepared_statement::execute_row()
 	{
-		int rc = sqlite3_step(m_statement);
+		int rc = sqlite3_step(m_statement.get());
 		if (rc == SQLITE_DONE)
 		{
 			return Row_result::Success;
@@ -217,31 +261,32 @@ namespace db
 
 	row_t Prepared_statement::fetch_row()
 	{
-		auto num_columns = sqlite3_column_count(m_statement);
+		auto ptr = m_statement.get ();
+		auto num_columns = sqlite3_column_count(ptr);
 		row_t result;
 		for (int i = 0; i < num_columns; ++i)
 		{
-			std::string colname = sqlite3_column_name(m_statement, i);
-			auto coltype = sqlite3_column_type(m_statement, i);
+			std::string colname = sqlite3_column_name(ptr, i);
+			auto coltype = sqlite3_column_type(ptr, i);
 			switch (coltype)
 			{
 			case SQLITE_NULL:
 				result[colname] = std::monostate{};
 				break;
 			case SQLITE_INTEGER:
-				result[colname] = sqlite3_column_int(m_statement, i);
+				result[colname] = sqlite3_column_int(ptr, i);
 				break;
 			case SQLITE_FLOAT:
-				result[colname] = sqlite3_column_double(m_statement, i);
+				result[colname] = sqlite3_column_double(ptr, i);
 				break;
 			case SQLITE_TEXT:
-				result[colname] = std::string{ reinterpret_cast<const char*> (sqlite3_column_text(m_statement, i)) };
+				result[colname] = std::string{ reinterpret_cast<const char*> (sqlite3_column_text(ptr, i)) };
 				break;
 			case SQLITE_BLOB:
 			{
 				Blob b;
-				b.value = const_cast<void*> (sqlite3_column_blob(m_statement, i));
-				b.size = sqlite3_column_bytes(m_statement, i);
+				b.value = const_cast<void*> (sqlite3_column_blob(ptr, i));
+				b.size = sqlite3_column_bytes(ptr, i);
 				result[colname] = b;
 			}
 			break;
@@ -265,18 +310,12 @@ namespace db
 
 	void Prepared_statement::reset() noexcept
 	{
-		sqlite3_reset(m_statement);
-		sqlite3_clear_bindings(m_statement);
+		sqlite3_reset(m_statement.get());
+		sqlite3_clear_bindings(m_statement.get());
 	}
 
-	struct cache_entry
-	{
-		cache_entry (std::string k, DB_connection::Mode m, std::weak_ptr<DB_connection> p) : key { std::move (k) }, mode { m }, conn { p }{}
-		std::string key;
-		DB_connection::Mode mode;
-		std::weak_ptr<DB_connection> conn;
-	};
 
+/*
 	db_connection_ptr DB_factory::create (const std::string& db_name, db::DB_connection::Mode mode)
 	{
 		auto itr = std::find_if (std::begin (m_cache), std::end (m_cache), [&db_name, mode] (cache_entry& ce){return ce.key == db_name && ce.mode == mode; });
@@ -299,5 +338,5 @@ namespace db
 		}
 	}
 
-	std::vector<cache_entry> DB_factory::m_cache {};
+	std::vector<cache_entry> DB_factory::m_cache {};*/
 }

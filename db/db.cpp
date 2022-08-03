@@ -1,8 +1,9 @@
 
 #include "db.h"
-//#include "sqlite3.h"
 #include <iostream>
 #include <cstdlib>
+#include <algorithm>
+#include <format>
 
 using namespace std;
 namespace db
@@ -107,47 +108,6 @@ namespace db
 		}
 	}
 
-/*	DB_connection::DB_connection(const DB_connection& other) : DB_connection{ other.m_path, other.m_mode } {}
-
-	DB_connection& DB_connection::operator=(DB_connection other)
-	{
-		swap(*this, other);
-		return *this;
-	}
-
-	DB_connection::DB_connection(DB_connection&& other) noexcept
-	{
-		swap(*this, other);
-	}
-
-	DB_connection& DB_connection::operator=(DB_connection&& other) noexcept
-	{
-		if (this != &other)
-		{
-			close();
-			swap(*this, other);
-		}
-		return *this;
-	}
-
-	DB_connection::~DB_connection() noexcept
-	{
-		std::cout << "connection destructor for " << m_path << "\n";
-		close();
-	}
-
-	void DB_connection::close() noexcept
-	{
-		sqlite3_stmt* statement = sqlite3_next_stmt(m_connection, nullptr);
-		while (statement != nullptr)
-		{
-			sqlite3_finalize(statement);
-			statement = sqlite3_next_stmt(m_connection, statement);
-		}
-		sqlite3_close_v2(m_connection);
-	}*/
-	
-
 
 	DB_connection::Ptr DB_connection::create (const std::string& name, Mode mode)
 	{
@@ -170,7 +130,7 @@ namespace db
 		}
 	}
 
-	Prepared_statement DB_connection::prepare(std::string sql)
+	Prepared_statement DB_connection::prepare(std::string_view sql)
 	{
 		int rc;
 		sqlite3_stmt* statement;
@@ -186,25 +146,6 @@ namespace db
 			throw db_exception(msg);
 		}
 	}
-
-/*	Prepared_statement::Prepared_statement(Prepared_statement&& other) noexcept
-	{
-		m_statement = other.m_statement;
-		other.m_statement = nullptr;
-	}
-
-	Prepared_statement& Prepared_statement::operator=(Prepared_statement&& other) noexcept
-	{
-		sqlite3_finalize(m_statement);
-		m_statement = other.m_statement;
-		other.m_statement = nullptr;
-		return *this;
-	}
-
-	Prepared_statement::~Prepared_statement() noexcept
-	{
-		sqlite3_finalize(m_statement);
-	}*/
 
 	Prepared_statement::Prepared_statement (sqlite3_stmt* stmt)
 	{
@@ -242,6 +183,12 @@ namespace db
 			}
 			, value
 		);
+	}
+
+	void Prepared_statement::bind(std::span<value_t> values)
+	{
+		unsigned int index{ 1 };
+		std::ranges::for_each(values, [this, &index](value_t value) {bind(index, value); ++index; });
 	}
 
 	Prepared_statement::Row_result Prepared_statement::execute_row()
@@ -314,29 +261,32 @@ namespace db
 		sqlite3_clear_bindings(m_statement.get());
 	}
 
-
-/*
-	db_connection_ptr DB_factory::create (const std::string& db_name, db::DB_connection::Mode mode)
+	bool as_bool(value_t value)
 	{
-		auto itr = std::find_if (std::begin (m_cache), std::end (m_cache), [&db_name, mode] (cache_entry& ce){return ce.key == db_name && ce.mode == mode; });
-		if (itr == std::end (m_cache))
-		{
-			auto ptr = std::make_shared<DB_connection> (db_name, mode);
-			//m_cache.emplace_back (cache_entry { db_name, mode, ptr });
-			m_cache.emplace_back (db_name, mode, ptr);
-			return ptr;
-		}
-		if (auto ptr = itr->conn.lock ())
-		{
-			return ptr;
-		}
-		else
-		{
-			auto p = std::make_shared<DB_connection> (db_name, mode);
-			itr->conn = p;
-			return p;
-		}
+		if (!std::holds_alternative<std::string>(value)) throw std::out_of_range("can only convert db string to bool");
+		auto str = std::get<std::string>(value);
+		if (str == "Y") return true;
+		if (str == "N") return false;
+		throw std::out_of_range(std::format("can't convert {} to bool", str));
 	}
 
-	std::vector<cache_entry> DB_factory::m_cache {};*/
+	int as_int(value_t value)
+	{
+		return std::get<int>(value);
+	}
+
+	double as_double(value_t value)
+	{
+		return std::get<double>(value);
+	}
+
+	std::string as_string(value_t value)
+	{
+		return std::get<std::string>(value);
+	}
+
+	bool is_null(value_t value)
+	{
+		return std::holds_alternative<std::monostate>(value);
+	}
 }

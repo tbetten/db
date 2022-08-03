@@ -9,7 +9,6 @@ C:\Users\T. Betten\source\repos\db\db_tester>"C:\Program Files (x86)\Microsoft V
 db.lib(db.obj) : error LNK2019: unresolved external symbol _sqlite3_close_v2 referenced in function "public: __thiscall db::DB_connection::DB_connection(class std::basic_string<char,struct std::char_traits<char>,class std::allocator<char> >,enum db::DB_connection::Mode)" (??0DB_connection@db@@QAE@V?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@W4Mode@01@@Z)
 */
 
-
 int main()
 {
 	db::Blob b{};
